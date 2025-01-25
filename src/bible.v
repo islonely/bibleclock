@@ -5,7 +5,7 @@ import rand
 import encoding.xml
 
 const raw = {
-	Version.kjv: './bibles/kjv.xml'
+	Version.kjv: $embed_file('./bibles/kjv.xml').to_string()
 }
 
 const book_names = ['Genesis', 'Exodus', 'Leviticus', 'Numbers', 'Deuteronomy', 'Joshua', 'Judges',
@@ -57,7 +57,7 @@ fn Bible.kjv() Bible {
 }
 
 fn Bible.new(version Version) !Bible {
-	doc := xml.XMLDocument.from_file(raw[version])!
+	doc := xml.XMLDocument.from_string(raw[version])!
 
 	translation := doc.get_elements_by_tag('bible')[0].attributes['translation'].split(' ')
 
@@ -159,7 +159,7 @@ fn (bible Bible) verse_from_time(t time.Time) (Book, Chapter, Verse) {
 	mut chapter := Chapter{}
 	mut verse := Verse{}
 	random_verse := fn [bible] () (Book, Chapter, Verse) {
-		book_idx := rand.int_in_range(1, 67) or { panic(err.str()) }
+		book_idx := rand.int_in_range(0, 66) or { panic(err.str()) }
 		book := bible.book(book_idx)
 		chapter_idx := rand.int_in_range(0, book.chapters.len) or { panic(err.str()) }
 		chapter := book.chapters[chapter_idx]

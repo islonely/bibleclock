@@ -3,13 +3,18 @@ module main
 import gg
 import gx
 import time
+import os
 
 @[heap]
 struct App {
 	gg.Context
 mut:
-	imgs []gg.Image
-	loc  shared struct {
+	state            AppState = .clock
+	img_offset_x     int
+	img_offset_x_vel f32
+	img_idx          int
+	imgs             []gg.Image
+	loc              shared struct {
 	mut:
 		book    Book
 		chapter Chapter
@@ -21,23 +26,33 @@ mut:
 	is_hour_min_separator_visible   bool = true
 }
 
+enum AppState {
+	clock
+	settings
+}
+
 fn main() {
 	mut app := &App{}
 	app.Context = gg.new_context(
 		// ui_mode:           true
 		user_data:         app
 		frame_fn:          frame
+		event_fn:          event
 		bg_color:          gx.white
 		width:             1024
 		height:            600
 		font_bytes_normal: $embed_file('./fonts/ubuntu/UbuntuMono-R.ttf').to_bytes()
 		// fullscreen: true
 	)
-	app.init() or {
-		println('Init failure: ${err.str()}')
-		exit(1)
-	}
+	app.init()
 	app.run()
+}
+
+fn event(evt &gg.Event, mut app App) {
+	if evt.typ == .mouse_move && app.mouse_buttons.has(.left) {
+		app.img_offset_x_vel = evt.mouse_dx
+		app.img_offset_x += int(evt.mouse_dx)
+	}
 }
 
 fn frame(mut app App) {
@@ -50,19 +65,82 @@ fn frame(mut app App) {
 	sz := app.window_size()
 	app.width = sz.width
 	app.height = sz.height
-	app.draw_image_background(app.imgs[0])
-	app.draw_rect_filled(0, 0, app.width, app.height, gx.rgba(0x00, 0x00, 0x00, 0x80))
-	app.draw_verse_time()
+
+	if app.state == .clock {
+		app.slide_to_nearest_img()
+		app.draw_image_background()
+		app.draw_rect_filled(0, 0, app.width, app.height, gx.rgba(0x00, 0x00, 0x00, 0x80))
+		app.draw_verse_time()
+	} else if app.state == .settings {
+	}
 	app.Context.end()
 }
 
-fn (mut app App) draw_image_background(img gg.Image) {
-	scaled_percent := f32(app.width) / f32(img.width)
-	w := scaled_percent * img.width
-	h := scaled_percent * img.height
-	x := 0
-	y := (app.height - h) / 2
+fn (mut app App) slide_to_nearest_img() {
+	if app.img_offset_x > app.width {
+		app.img_offset_x = app.width
+		return
+	}
+	if app.img_offset_x < -app.width {
+		app.img_offset_x = -app.width
+		return
+	}
+	if app.mouse_buttons.has(.left) {
+	} else {
+		if app.img_offset_x % app.width == 0 && app.img_offset_x_vel != 0 {
+			app.img_offset_x = 0
+			app.img_idx = if app.img_offset_x_vel > 0 {
+				if app.img_idx - 1 < 0 {
+					app.imgs.len - 1
+				} else {
+					app.img_idx - 1
+				}
+			} else {
+				if app.img_idx + 1 == app.imgs.len {
+					0
+				} else {
+					app.img_idx + 1
+				}
+			}
+			app.img_idx
+			app.img_offset_x_vel = 0
+			return
+		}
+		app.img_offset_x += int(app.img_offset_x_vel)
+	}
+}
+
+fn (mut app App) draw_image_background() {
+	if app.imgs.len == 0 {
+		return
+	}
+	img := app.imgs[app.img_idx]
+	last_img := if app.img_idx - 1 < 0 {
+		app.imgs[app.imgs.len - 1]
+	} else {
+		app.imgs[app.img_idx - 1]
+	}
+	next_img := if app.img_idx + 1 == app.imgs.len {
+		app.imgs[0]
+	} else {
+		app.imgs[app.img_idx + 1]
+	}
+	gen_rect := fn [app] (img gg.Image) (f32, f32, f32, f32) {
+		scaled_percent := f32(app.width) / f32(img.width)
+		w := scaled_percent * img.width
+		h := scaled_percent * img.height
+		x := app.img_offset_x
+		y := (app.height - h) / 2
+		return x, y, w, h
+	}
+	x, y, w, h := gen_rect(img)
+	_, last_y, last_w, last_h := gen_rect(last_img)
+	last_x := x - app.width
+	_, next_y, next_w, next_h := gen_rect(next_img)
+	next_x := x + app.width
+	app.draw_image(last_x, last_y, last_w, last_h, last_img)
 	app.draw_image(x, y, w, h, img)
+	app.draw_image(next_x, next_y, next_w, next_h, next_img)
 }
 
 fn (mut app App) draw_verse_time() {
@@ -140,8 +218,14 @@ fn (mut app App) draw_verse_time() {
 	}
 }
 
-fn (mut app App) init() ! {
-	app.imgs << app.create_image(r'C:\Users\imado\Pictures\Video Projects\emmanuel-phaeton-ZFIkUxRTWHk-unsplash.jpg')!
+fn (mut app App) init() {
+	// app.imgs << app.create_image(r'C:\Users\imado\Pictures\Video Projects\emmanuel-phaeton-ZFIkUxRTWHk-unsplash.jpg')!
+	os.walk('./pictures', fn [mut app] (file string) {
+		app.imgs << app.create_image(file) or {
+			println(err.str())
+			exit(1)
+		}
+	})
 	app.update_verse()
 	spawn fn [mut app] () {
 		for {
