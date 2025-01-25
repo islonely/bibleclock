@@ -2,8 +2,10 @@ module main
 
 import gg
 import gx
-import time
 import os
+import time
+import rand
+import math
 
 @[heap]
 struct App {
@@ -14,6 +16,13 @@ mut:
 	img_offset_x_vel f32
 	img_idx          int
 	imgs             []gg.Image
+	img_paths        []string
+	img              struct {
+	mut:
+		prev gg.Image
+		curr gg.Image
+		next gg.Image
+	}
 	loc              shared struct {
 	mut:
 		book    Book
@@ -44,7 +53,10 @@ fn main() {
 		font_bytes_normal: $embed_file('./fonts/ubuntu/UbuntuMono-R.ttf').to_bytes()
 		// fullscreen: true
 	)
-	app.init()
+	app.init() or {
+		println(err)
+		exit(1)
+	}
 	app.run()
 }
 
@@ -89,20 +101,28 @@ fn (mut app App) slide_to_nearest_img() {
 	} else {
 		if app.img_offset_x % app.width == 0 && app.img_offset_x_vel != 0 {
 			app.img_offset_x = 0
-			app.img_idx = if app.img_offset_x_vel > 0 {
-				if app.img_idx - 1 < 0 {
-					app.imgs.len - 1
-				} else {
-					app.img_idx - 1
-				}
+			// app.img_idx = if app.img_offset_x_vel > 0 {
+			// 	if app.img_idx - 1 < 0 {
+			// 		app.imgs.len - 1
+			// 	} else {
+			// 		app.img_idx - 1
+			// 	}
+			// } else {
+			// 	if app.img_idx + 1 == app.imgs.len {
+			// 		0
+			// 	} else {
+			// 		app.img_idx + 1
+			// 	}
+			// }
+			if app.img_offset_x_vel > 0 {
+				app.img_idx--
 			} else {
-				if app.img_idx + 1 == app.imgs.len {
-					0
-				} else {
-					app.img_idx + 1
-				}
+				app.img_idx++
 			}
-			app.img_idx
+			app.load_imgs() or {
+				println(err)
+				exit(1)
+			}
 			app.img_offset_x_vel = 0
 			return
 		}
@@ -114,17 +134,17 @@ fn (mut app App) draw_image_background() {
 	if app.imgs.len == 0 {
 		return
 	}
-	img := app.imgs[app.img_idx]
-	last_img := if app.img_idx - 1 < 0 {
-		app.imgs[app.imgs.len - 1]
-	} else {
-		app.imgs[app.img_idx - 1]
-	}
-	next_img := if app.img_idx + 1 == app.imgs.len {
-		app.imgs[0]
-	} else {
-		app.imgs[app.img_idx + 1]
-	}
+	// img := app.imgs[app.img_idx]
+	// last_img := if app.img_idx - 1 < 0 {
+	// 	app.imgs[app.imgs.len - 1]
+	// } else {
+	// 	app.imgs[app.img_idx - 1]
+	// }
+	// next_img := if app.img_idx + 1 == app.imgs.len {
+	// 	app.imgs[0]
+	// } else {
+	// 	app.imgs[app.img_idx + 1]
+	// }
 	gen_rect := fn [app] (img gg.Image) (f32, f32, f32, f32) {
 		scaled_percent := f32(app.width) / f32(img.width)
 		w := scaled_percent * img.width
@@ -133,14 +153,14 @@ fn (mut app App) draw_image_background() {
 		y := (app.height - h) / 2
 		return x, y, w, h
 	}
-	x, y, w, h := gen_rect(img)
-	_, last_y, last_w, last_h := gen_rect(last_img)
-	last_x := x - app.width
-	_, next_y, next_w, next_h := gen_rect(next_img)
+	x, y, w, h := gen_rect(app.img.curr)
+	_, prev_y, prev_w, prev_h := gen_rect(app.img.prev)
+	prev_x := x - app.width
+	_, next_y, next_w, next_h := gen_rect(app.img.next)
 	next_x := x + app.width
-	app.draw_image(last_x, last_y, last_w, last_h, last_img)
-	app.draw_image(x, y, w, h, img)
-	app.draw_image(next_x, next_y, next_w, next_h, next_img)
+	app.draw_image(prev_x, prev_y, prev_w, prev_h, app.img.prev)
+	app.draw_image(x, y, w, h, app.img.curr)
+	app.draw_image(next_x, next_y, next_w, next_h, app.img.next)
 }
 
 fn (mut app App) draw_verse_time() {
@@ -218,15 +238,17 @@ fn (mut app App) draw_verse_time() {
 	}
 }
 
-fn (mut app App) init() {
-	// app.imgs << app.create_image(r'C:\Users\imado\Pictures\Video Projects\emmanuel-phaeton-ZFIkUxRTWHk-unsplash.jpg')!
+fn (mut app App) init() ! {
 	os.walk('./pictures', fn [mut app] (file string) {
+		app.img_paths << file
 		app.imgs << app.create_image(file) or {
 			println(err.str())
 			exit(1)
 		}
 	})
-	app.update_verse()
+	rand.shuffle(mut app.img_paths) or { println('[Notice] Failed to randomize pictures: ${err}') }
+	app.load_imgs()!
+
 	spawn fn [mut app] () {
 		for {
 			mut should_update := false
@@ -243,6 +265,15 @@ fn (mut app App) init() {
 	}()
 }
 
+fn (mut app App) load_imgs() ! {
+	app.remove_cached_image_by_idx(app.img.next.id)
+	app.remove_cached_image_by_idx(app.img.curr.id)
+	app.remove_cached_image_by_idx(app.img.prev.id)
+	app.img.prev = app.create_image(wrapping_index(app.img_paths, app.img_idx - 1))!
+	app.img.curr = app.create_image(wrapping_index(app.img_paths, app.img_idx))!
+	app.img.next = app.create_image(wrapping_index(app.img_paths, app.img_idx + 1))!
+}
+
 fn (mut app App) update_verse() {
 	t := time.now()
 	b, c, v := kjv.verse_from_time(t)
@@ -252,6 +283,22 @@ fn (mut app App) update_verse() {
 		app.loc.verse = v
 		app.loc.time = t
 	}
+}
+
+// wrapping_index takes in any positive or negative number and returns a value from the array.
+// If we have `arr := [0, 1, 2]`, then an index of -1 returns `arr[arr.len - 1]`. It also returns
+// a value when you provide a absolute index greater than array length. Index of 13 returns
+// the value of `arr[1]`.
+fn wrapping_index[T](arr []T, index int) T {
+	i := if index < 0 {
+		arr.len - (math.abs(index) % arr.len)
+	} else if index >= arr.len {
+		index % arr.len
+	} else {
+		index
+	}
+
+	return arr[i]
 }
 
 fn text_trunc_to_lines(text string, max_chars int, max_lines int) []string {
