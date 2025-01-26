@@ -15,7 +15,6 @@ mut:
 	img_offset_x     int
 	img_offset_x_vel f32
 	img_idx          int
-	imgs             []gg.Image
 	img_paths        []string
 	img              struct {
 	mut:
@@ -60,6 +59,7 @@ fn main() {
 	app.run()
 }
 
+// event handles touch, mouse, and keyboard events for the app.
 fn event(evt &gg.Event, mut app App) {
 	if evt.typ == .mouse_move && app.mouse_buttons.has(.left) {
 		app.img_offset_x_vel = evt.mouse_dx
@@ -67,6 +67,7 @@ fn event(evt &gg.Event, mut app App) {
 	}
 }
 
+// frame is invoked to draw to the screen.
 fn frame(mut app App) {
 	app.Context.begin()
 	// blink between "12:01" and "12 01" every second
@@ -88,6 +89,8 @@ fn frame(mut app App) {
 	app.Context.end()
 }
 
+// slide_to_nearest_img continues to slide the image after the user has swiped until
+// the next image is fully in view.
 fn (mut app App) slide_to_nearest_img() {
 	if app.img_offset_x > app.width {
 		app.img_offset_x = app.width
@@ -101,24 +104,12 @@ fn (mut app App) slide_to_nearest_img() {
 	} else {
 		if app.img_offset_x % app.width == 0 && app.img_offset_x_vel != 0 {
 			app.img_offset_x = 0
-			// app.img_idx = if app.img_offset_x_vel > 0 {
-			// 	if app.img_idx - 1 < 0 {
-			// 		app.imgs.len - 1
-			// 	} else {
-			// 		app.img_idx - 1
-			// 	}
-			// } else {
-			// 	if app.img_idx + 1 == app.imgs.len {
-			// 		0
-			// 	} else {
-			// 		app.img_idx + 1
-			// 	}
-			// }
 			if app.img_offset_x_vel > 0 {
 				app.img_idx--
 			} else {
 				app.img_idx++
 			}
+			app.uncache_imgs()
 			app.load_imgs() or {
 				println(err)
 				exit(1)
@@ -130,21 +121,8 @@ fn (mut app App) slide_to_nearest_img() {
 	}
 }
 
+// draw_image_background draws the previous, current, and next background images.
 fn (mut app App) draw_image_background() {
-	if app.imgs.len == 0 {
-		return
-	}
-	// img := app.imgs[app.img_idx]
-	// last_img := if app.img_idx - 1 < 0 {
-	// 	app.imgs[app.imgs.len - 1]
-	// } else {
-	// 	app.imgs[app.img_idx - 1]
-	// }
-	// next_img := if app.img_idx + 1 == app.imgs.len {
-	// 	app.imgs[0]
-	// } else {
-	// 	app.imgs[app.img_idx + 1]
-	// }
 	gen_rect := fn [app] (img gg.Image) (f32, f32, f32, f32) {
 		scaled_percent := f32(app.width) / f32(img.width)
 		w := scaled_percent * img.width
@@ -153,16 +131,22 @@ fn (mut app App) draw_image_background() {
 		y := (app.height - h) / 2
 		return x, y, w, h
 	}
+
 	x, y, w, h := gen_rect(app.img.curr)
-	_, prev_y, prev_w, prev_h := gen_rect(app.img.prev)
-	prev_x := x - app.width
-	_, next_y, next_w, next_h := gen_rect(app.img.next)
-	next_x := x + app.width
-	app.draw_image(prev_x, prev_y, prev_w, prev_h, app.img.prev)
 	app.draw_image(x, y, w, h, app.img.curr)
-	app.draw_image(next_x, next_y, next_w, next_h, app.img.next)
+
+	if app.img_offset_x != 0 {
+		_, py, pw, ph := gen_rect(app.img.prev)
+		px := x - app.width
+		_, ny, nw, nh := gen_rect(app.img.next)
+		nx := x + app.width
+		app.draw_image(px, py, pw, ph, app.img.prev)
+		app.draw_image(nx, ny, nw, nh, app.img.next)
+	}
 }
 
+// draw_verse_time draws the current verse text to the screen and the verses reference
+// and current time.
 fn (mut app App) draw_verse_time() {
 	verse_padding := 15
 	verse_font_size := 40
@@ -238,13 +222,10 @@ fn (mut app App) draw_verse_time() {
 	}
 }
 
+// init is called before the App is started.
 fn (mut app App) init() ! {
 	os.walk('./pictures', fn [mut app] (file string) {
 		app.img_paths << file
-		app.imgs << app.create_image(file) or {
-			println(err.str())
-			exit(1)
-		}
 	})
 	rand.shuffle(mut app.img_paths) or { println('[Notice] Failed to randomize pictures: ${err}') }
 	app.load_imgs()!
@@ -265,15 +246,21 @@ fn (mut app App) init() ! {
 	}()
 }
 
-fn (mut app App) load_imgs() ! {
+// uncache_imgs removes the images from the Context.
+fn (mut app App) uncache_imgs() {
 	app.remove_cached_image_by_idx(app.img.next.id)
 	app.remove_cached_image_by_idx(app.img.curr.id)
 	app.remove_cached_image_by_idx(app.img.prev.id)
+}
+
+// load_imgs reads the images from a file and caches them to the context.
+fn (mut app App) load_imgs() ! {
 	app.img.prev = app.create_image(wrapping_index(app.img_paths, app.img_idx - 1))!
 	app.img.curr = app.create_image(wrapping_index(app.img_paths, app.img_idx))!
 	app.img.next = app.create_image(wrapping_index(app.img_paths, app.img_idx + 1))!
 }
 
+// update_verse sets the selected verse to the current time.
 fn (mut app App) update_verse() {
 	t := time.now()
 	b, c, v := kjv.verse_from_time(t)
@@ -301,6 +288,9 @@ fn wrapping_index[T](arr []T, index int) T {
 	return arr[i]
 }
 
+// text_trunc_to_lines returns the provided text as an array of lines with a max length
+// of `max_chars` per line. If the array of lines exceeds `max_lines`, then only the
+// first `max_lines` is returned.
 fn text_trunc_to_lines(text string, max_chars int, max_lines int) []string {
 	mut lines := []string{cap: text.len / max_chars}
 	mut buffer := []u8{cap: max_chars}
@@ -323,6 +313,9 @@ fn text_trunc_to_lines(text string, max_chars int, max_lines int) []string {
 				lines << buffer.bytestr().trim_space()
 				start += max_chars
 			}
+			if lines.len == max_lines {
+				return lines
+			}
 			buffer = []u8{cap: max_chars}
 			last_space = -1
 		}
@@ -330,10 +323,6 @@ fn text_trunc_to_lines(text string, max_chars int, max_lines int) []string {
 
 	if buffer.len > 0 {
 		lines << buffer.bytestr().trim_space()
-	}
-
-	if lines.len > max_lines {
-		return lines[..max_lines]
 	}
 
 	return lines
