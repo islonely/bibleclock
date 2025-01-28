@@ -32,6 +32,8 @@ mut:
 
 	should_hour_min_separator_blink bool = true
 	is_hour_min_separator_visible   bool = true
+
+	touches map[u64]gg.TouchPoint
 }
 
 enum AppState {
@@ -64,6 +66,32 @@ fn event(evt &gg.Event, mut app App) {
 	if evt.typ == .mouse_move && app.mouse_buttons.has(.left) {
 		app.img_offset_x_vel = evt.mouse_dx
 		app.img_offset_x += int(evt.mouse_dx)
+		return
+	}
+
+	if evt.typ == .touches_ended {
+		for touch in evt.touches {
+			if touch.identifier in app.touches.keys() {
+				app.touches.delete(touch.identifier)
+			}
+		}
+		return
+	}
+
+	if evt.typ == .touches_moved {
+		for touch in evt.touches {
+			if touch.identifier == 0 {
+				continue
+			}
+			app.touches[touch.identifier] = touch
+		}
+
+		// only allow swiping with one finger
+		if app.touches.len > 1 {
+			app.img_offset_x_vel = evt.mouse_dx
+			app.img_offset_x += int(evt.mouse_dx)
+		}
+		return
 	}
 }
 
