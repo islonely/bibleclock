@@ -33,7 +33,11 @@ mut:
 	should_hour_min_separator_blink bool = true
 	is_hour_min_separator_visible   bool = true
 
-	touches map[u64]gg.TouchPoint
+	touches  map[u64]gg.TouchPoint
+	origin_x int
+	origin_y int
+
+	settings Settings
 }
 
 enum AppState {
@@ -63,35 +67,53 @@ fn main() {
 
 // event handles touch, mouse, and keyboard events for the app.
 fn event(evt &gg.Event, mut app App) {
-	if evt.typ == .mouse_move && app.mouse_buttons.has(.left) {
-		app.img_offset_x_vel = evt.mouse_dx
-		app.img_offset_x += int(evt.mouse_dx)
-		return
-	}
-
-	if evt.typ == .touches_ended {
-		for touch in evt.touches {
-			if touch.identifier in app.touches.keys() {
-				app.touches.delete(touch.identifier)
-			}
-		}
-		return
-	}
-
-	if evt.typ == .touches_moved {
-		for touch in evt.touches {
-			if touch.identifier == 0 {
-				continue
-			}
-			app.touches[touch.identifier] = touch
+	if app.state == .clock {
+		if evt.typ == .mouse_down {
+			app.origin_x = int(evt.mouse_x)
+			app.origin_y = int(evt.mouse_y)
 		}
 
-		// only allow swiping with one finger
-		if app.touches.len > 1 {
+		if evt.typ == .mouse_up {
+			is_curr_point_within_25_of_origin := evt.mouse_x >= app.origin_x - 25
+				&& evt.mouse_x <= app.origin_x + 25 && evt.mouse_y >= app.origin_y - 25
+				&& evt.mouse_y <= app.origin_y + 25
+			if is_curr_point_within_25_of_origin {
+				app.state = .settings
+			}
+		}
+
+		if evt.typ == .mouse_move && app.mouse_buttons.has(.left) {
 			app.img_offset_x_vel = evt.mouse_dx
 			app.img_offset_x += int(evt.mouse_dx)
+			return
 		}
-		return
+
+		if evt.typ == .touches_ended {
+			for touch in evt.touches {
+				if touch.identifier in app.touches.keys() {
+					app.touches.delete(touch.identifier)
+				}
+			}
+			return
+		}
+
+		if evt.typ == .touches_moved {
+			for touch in evt.touches {
+				if touch.identifier == 0 {
+					continue
+				}
+				app.touches[touch.identifier] = touch
+			}
+
+			// only allow swiping with one finger
+			if app.touches.len > 1 {
+				app.img_offset_x_vel = evt.mouse_dx
+				app.img_offset_x += int(evt.mouse_dx)
+			}
+			return
+		}
+	} else if app.state == .settings {
+		app.settings.event(evt)
 	}
 }
 
@@ -113,6 +135,9 @@ fn frame(mut app App) {
 		app.draw_rect_filled(0, 0, app.width, app.height, gx.rgba(0x00, 0x00, 0x00, 0x80))
 		app.draw_verse_time()
 	} else if app.state == .settings {
+		app.draw_image_background()
+		app.draw_rect_filled(0, 0, app.width, app.height, gx.rgba(0x00, 0x00, 0x00, 0xdd))
+		app.settings.draw(mut app.Context)
 	}
 	app.Context.end()
 }
@@ -257,6 +282,15 @@ fn (mut app App) init() ! {
 	})
 	rand.shuffle(mut app.img_paths) or { println('[Notice] Failed to randomize pictures: ${err}') }
 	app.load_imgs()!
+
+	app.settings.items << CycleMenuItem{
+		name:   'Hour Format'
+		values: ['12-Hour', '24-Hour']
+	}
+	app.settings.items << FieldMenuItem{
+		name:  'Load Picture From'
+		value: '/media/pi'
+	}
 
 	spawn fn [mut app] () {
 		for {
